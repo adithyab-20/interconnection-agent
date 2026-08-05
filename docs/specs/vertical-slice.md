@@ -1,6 +1,6 @@
 # Spec: Verified Interconnection Assessment — Vertical Slice
 
-**Scope:** Phases 1–4 of `Interconnection_Agent_Claude_Code_Spec.md`, plus the first 10 golden
+**Scope:** Phases 1–4 of `build-spec.md`, plus the first 10 golden
 cases. JSON/CLI output; no dashboard. This is the demoable milestone agreed in grilling —
 the point at which the project is coherent enough to show someone.
 
