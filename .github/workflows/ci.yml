@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: interconnection
+          # Ephemeral CI DB — no password (trust auth); nothing to leak.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          # Match docker-compose.yml: host 5433 -> container 5432, so the default
+          # DATABASE_URL resolves in CI exactly as it does locally.
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d interconnection"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint (ruff)
+        run: uv run ruff check
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check
+
+      - name: Type check (mypy)
+        run: uv run mypy
+
+      - name: Test (pytest)
+        run: uv run pytest
