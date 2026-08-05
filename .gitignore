@@ -222,6 +222,7 @@ __marimo__/
 *.xlsx
 
 plan_files/
+data/
 
 # macOS
 .DS_Store
