@@ -8,9 +8,11 @@ services:
       # the repo entirely; never use trust auth for a real deployment.
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      # host:container — host 5433 (not 5432) so a locally-installed Postgres
-      # can keep 5432. The default DATABASE_URL (see .env.example) expects 5433.
-      - "5433:5432"
+      # Bound to 127.0.0.1 so this trust-auth database is reachable only from this
+      # machine, never from the LAN. host:container — host 5433 (not 5432) leaves
+      # 5432 for a locally-installed Postgres; the default DATABASE_URL (see
+      # .env.example) expects 5433.
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
