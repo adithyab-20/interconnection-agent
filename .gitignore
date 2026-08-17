@@ -222,7 +222,13 @@ __marimo__/
 *.xlsx
 
 plan_files/
-data/
+# Ignore the data dir's contents (large source workbooks stay out of git) but keep the
+# frozen CAISO snapshot the integration tests read — see tests/integration/test_ingest_caiso.py.
+# Needs `data/*` (not `data/`): git won't descend into a directory excluded with a trailing
+# slash, so a `!` re-include of a file inside it would be ignored.
+data/*
+!data/publicqueuereport.xlsx
+!data/README.md
 
 # macOS
 .DS_Store

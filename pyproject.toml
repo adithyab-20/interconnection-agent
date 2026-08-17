@@ -5,6 +5,7 @@ description = "Verified interconnection-risk assessment grounded in public ISO q
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2",
 ]
 
@@ -13,6 +14,7 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.9",
     "mypy>=1.14",
+    "types-openpyxl>=3.1.5.20260724",
 ]
 
 [build-system]
