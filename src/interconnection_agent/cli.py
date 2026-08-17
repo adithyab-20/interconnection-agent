@@ -15,34 +15,26 @@ from __future__ import annotations
 
 import argparse
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import cast
 
 import psycopg
+from psycopg.rows import class_row
 
 from interconnection_agent.db import connect
 from interconnection_agent.ingest import run_caiso_ingest
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
-# The shape of one row the county query returns, in the column order selected below.
-# The named-tuple positions line up with ActiveProject's fields, so a row maps to one
-# with ActiveProject(*row) once cast from the connection's untyped tuple[object, ...].
-ProjectRow = tuple[
-    str,
-    str | None,
-    str | None,
-    str | None,
-    str | None,
-    datetime.date | None,
-    datetime.date | None,
-]
-
 
 @dataclass(frozen=True)
 class ActiveProject:
-    """One active project as the county listing presents it (a view row, flattened)."""
+    """One active project as the county listing presents it (a view row, flattened).
+
+    This is the single source of truth for the county listing's shape: the SELECT column
+    list is derived from these field names and rows are mapped back by name (see
+    ``list_active_projects``), so adding a field here extends the query automatically.
+    """
 
     native_id: str
     county: str | None
@@ -53,21 +45,25 @@ class ActiveProject:
     proposed_online_date: datetime.date | None
 
 
+# The columns the county query selects, derived from ActiveProject so the two cannot drift.
+# Field names match the caiso_projects view's columns; class_row maps rows back by name.
+_PROJECT_COLUMNS = ", ".join(f.name for f in fields(ActiveProject))
+
+
 def list_active_projects(conn: Conn, county: str) -> list[ActiveProject]:
     """Return the active CAISO projects in ``county`` (case-insensitive), ordered by id.
 
     Reads the per-source view so only CAISO rows are considered. All narrowing happens in
     SQL — the caller never post-filters a broader result set.
     """
-    rows = conn.execute(
-        "SELECT native_id, county, study_region, raw_poi, utility, q_date, "
-        "       proposed_online_date "
-        "FROM caiso_projects "
-        "WHERE status = 'Active' AND upper(county) = upper(%s) "
-        "ORDER BY native_id",
-        (county,),
-    ).fetchall()
-    return [ActiveProject(*cast(ProjectRow, r)) for r in rows]
+    with conn.cursor(row_factory=class_row(ActiveProject)) as cur:
+        return cur.execute(
+            f"SELECT {_PROJECT_COLUMNS} "
+            "FROM caiso_projects "
+            "WHERE status = 'Active' AND upper(county) = upper(%s) "
+            "ORDER BY native_id",
+            (county,),
+        ).fetchall()
 
 
 def _date(value: datetime.date | None) -> str:
