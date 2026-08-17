@@ -228,6 +228,7 @@ plan_files/
 # slash, so a `!` re-include of a file inside it would be ignored.
 data/*
 !data/publicqueuereport.xlsx
+!data/README.md
 
 # macOS
 .DS_Store
