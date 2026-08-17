@@ -4,10 +4,11 @@ Two subcommands:
 
   * ``ingest <workbook>`` — load CAISO's active sheet into the canonical schema and print
     the resulting :class:`~interconnection_agent.ingest.report.IngestReport`;
-  * ``projects --county <county>`` — list the active projects in a county.
+  * ``projects --county <county>`` — list the active projects in a county;
+  * ``projects --poi <name>`` — list the projects at a normalized (reviewed) POI.
 
-The county listing reads through the ``caiso_projects`` view, never the base table, so a
-project that also appears in LBNL's national file cannot leak into a CAISO listing — the
+Both listings read through the ``caiso_projects`` view, never the base table, so a project
+that also appears in LBNL's national file cannot leak into a CAISO listing — the
 no-double-counting guarantee is structural (ADR-0001), not a WHERE clause to remember.
 """
 
@@ -40,6 +41,7 @@ class ActiveProject:
     county: str | None
     study_region: str | None
     raw_poi: str | None
+    normalized_poi: str | None
     utility: str | None
     q_date: datetime.date | None
     proposed_online_date: datetime.date | None
@@ -66,16 +68,40 @@ def list_active_projects(conn: Conn, county: str) -> list[ActiveProject]:
         ).fetchall()
 
 
+def list_projects_at_poi(conn: Conn, poi: str) -> list[ActiveProject]:
+    """Return the CAISO projects at a normalized POI (case-insensitive), ordered by id.
+
+    Matches on ``normalized_poi``, the reviewed canonical name — so the reviewed aliases
+    for one substation are grouped and the operator's raw spellings collapse into a single
+    POI. Reads the per-source view; all narrowing happens in SQL. Rows left unmapped
+    (``normalized_poi`` NULL) never match, so an unresolved string cannot masquerade as a
+    POI hit.
+    """
+    with conn.cursor(row_factory=class_row(ActiveProject)) as cur:
+        return cur.execute(
+            f"SELECT {_PROJECT_COLUMNS} "
+            "FROM caiso_projects "
+            "WHERE upper(normalized_poi) = upper(%s) "
+            "ORDER BY native_id",
+            (poi,),
+        ).fetchall()
+
+
 def _date(value: datetime.date | None) -> str:
     return value.isoformat() if value is not None else "-"
 
 
-def format_projects(projects: list[ActiveProject], county: str) -> str:
-    """Render a county listing as plain lines: a header, then one line per project."""
-    if not projects:
-        return f"No active CAISO projects in county {county!r}."
+def format_projects(projects: list[ActiveProject], scope: str) -> str:
+    """Render a project listing as plain lines: a header, then one line per project.
 
-    header = f"{len(projects)} active CAISO project(s) in county {county!r}:"
+    ``scope`` is the prepositional phrase naming what was queried — ``"in county
+    'SOLANO'"`` or ``"at POI 'Birds Landing 230 kV'"`` — so the same renderer serves both
+    listings and an empty result reads as an explicit "no matching evidence".
+    """
+    if not projects:
+        return f"No CAISO projects {scope}."
+
+    header = f"{len(projects)} CAISO project(s) {scope}:"
     lines = [
         f"  {p.native_id}  q={_date(p.q_date)}  online~{_date(p.proposed_online_date)}  "
         f"{p.utility or '-'}  {p.study_region or '-'}  {p.raw_poi or '-'}"
@@ -92,6 +118,11 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         f"Ingested CAISO active sheet: {report.rows_written} written, "
         f"{report.rows_dropped} dropped, {report.rows_read} read."
     )
+    print(
+        f"  POI coverage: {report.unmapped_rows} unmapped "
+        f"({report.unmapped_mw:.0f} of {report.active_mw:.0f} active MW, "
+        f"{report.unmapped_mw_share:.2%})."
+    )
     for dropped in report.dropped:
         print(f"  dropped row {dropped.row_number}: {dropped.reason}")
     return 0
@@ -99,8 +130,13 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
 
 def _cmd_projects(args: argparse.Namespace) -> int:
     with connect() as conn:
-        projects = list_active_projects(conn, args.county)
-    print(format_projects(projects, county=args.county))
+        if args.poi is not None:
+            projects = list_projects_at_poi(conn, args.poi)
+            scope = f"at POI {args.poi!r}"
+        else:
+            projects = list_active_projects(conn, args.county)
+            scope = f"in county {args.county!r}"
+    print(format_projects(projects, scope=scope))
     return 0
 
 
@@ -112,8 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("workbook", help="path to publicqueuereport.xlsx")
     ingest.set_defaults(func=_cmd_ingest)
 
-    projects = sub.add_parser("projects", help="list active CAISO projects in a county")
-    projects.add_argument("--county", required=True, help="county name (case-insensitive)")
+    projects = sub.add_parser("projects", help="list CAISO projects by county or normalized POI")
+    scope = projects.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--county", help="county name (case-insensitive)")
+    scope.add_argument("--poi", help="normalized POI name (case-insensitive)")
     projects.set_defaults(func=_cmd_projects)
 
     args = parser.parse_args(argv)

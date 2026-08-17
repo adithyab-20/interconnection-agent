@@ -17,6 +17,7 @@ def _project(**overrides: object) -> ActiveProject:
         "county": "SOLANO",
         "study_region": "Northern",
         "raw_poi": "Birds Landing 230 kV",
+        "normalized_poi": "Birds Landing 230 kV",
         "utility": "PGAE",
         "q_date": datetime.date(2003, 11, 18),
         "proposed_online_date": datetime.date(2005, 6, 30),
@@ -26,7 +27,7 @@ def _project(**overrides: object) -> ActiveProject:
 
 
 def test_format_renders_one_line_per_project() -> None:
-    rendered = format_projects([_project()], county="SOLANO")
+    rendered = format_projects([_project()], scope="in county 'SOLANO'")
     lines = rendered.splitlines()
     assert len(lines) == 2  # one header line, one project line
     assert "CAISO-0022" in rendered
@@ -34,8 +35,8 @@ def test_format_renders_one_line_per_project() -> None:
     assert "SOLANO" in rendered
 
 
-def test_format_reports_an_empty_county_rather_than_a_blank() -> None:
+def test_format_reports_an_empty_scope_rather_than_a_blank() -> None:
     # An analyst must get an explicit "no matching evidence", never a silent blank.
-    rendered = format_projects([], county="NOWHERE")
-    assert "No active" in rendered
+    rendered = format_projects([], scope="in county 'NOWHERE'")
+    assert "No CAISO projects" in rendered
     assert "NOWHERE" in rendered

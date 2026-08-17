@@ -9,9 +9,13 @@ upserts in place rather than duplicating (golden eval cases store these ids).
 Scope, deliberately narrow (ticket 4, the walking skeleton):
   * active sheet only — completed and withdrawn come later (ticket 6);
   * parent ``projects`` rows only — the multi-fuel ``project_resources`` child rows are
-    ticket 6, so nothing is written to that table here;
-  * ``normalized_poi`` is left NULL and ``poi_unmapped`` true — the reviewed alias table
-    is ticket 5, and a guessed normalization is worse than an honest "unmapped".
+    ticket 6, so nothing is written to that table here.
+
+Each row's station string is resolved to a canonical POI through the reviewed alias table
+(ticket 5) by exact match — never fuzzy. A row whose string has no reviewed entry lands
+with ``normalized_poi`` NULL and ``poi_unmapped`` true, and is counted (with its MW) in
+the report rather than guessed. ``Net MWs to Grid`` is read only to weight that coverage
+figure; per-resource MW child rows remain ticket 6.
 
 The column mapping is expressed against the sheet's own header text, not bare column
 indices, so a reviewer can see which CAISO field feeds which canonical column.
@@ -27,6 +31,7 @@ import psycopg
 from openpyxl.worksheet.worksheet import Worksheet
 
 from interconnection_agent.ingest.report import DroppedRow, IngestReport
+from interconnection_agent.poi import load_alias_table
 
 # The workbook's three tabs; only the first is in scope for this ticket.
 ACTIVE_SHEET = "Grid GenerationQueue"
@@ -45,6 +50,7 @@ STATE = "State"
 UTILITY = "Utility"
 PTO_STUDY_REGION = "PTO Study Region"
 STATION = "Station or Transmission Line"
+NET_MW_TO_GRID = "Net MWs to Grid"
 PROPOSED_ONLINE_DATE = "Proposed On-line Date (as filed with IR)"
 
 # CAISO's status vocabulary -> the canonical set. The active sheet only ever says ACTIVE;
@@ -104,13 +110,28 @@ def _verbatim(value: object) -> str | None:
     return str(value) if value is not None else None
 
 
+def _mw(value: object) -> float:
+    """Coerce a Net-MW cell to a float; a blank or non-numeric cell contributes zero."""
+    if isinstance(value, bool):  # bool is an int subclass; never a MW quantity
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if value is not None:
+        try:
+            return float(str(value).strip())
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 _UPSERT = """
     INSERT INTO projects (
         source, native_id, status, q_date, proposed_online_date,
         county, state, iso, study_region, raw_poi, normalized_poi, poi_unmapped, utility
     ) VALUES (
         'caiso_raw', %(native_id)s, %(status)s, %(q_date)s, %(proposed_online_date)s,
-        %(county)s, %(state)s, 'CAISO', %(study_region)s, %(raw_poi)s, NULL, true, %(utility)s
+        %(county)s, %(state)s, 'CAISO', %(study_region)s, %(raw_poi)s,
+        %(normalized_poi)s, %(poi_unmapped)s, %(utility)s
     )
     ON CONFLICT (source, native_id) DO UPDATE SET
         status               = EXCLUDED.status,
@@ -135,6 +156,7 @@ def run_caiso_ingest(
     field values are unchanged on a second pass. Does not commit — the caller owns the
     transaction boundary, matching :func:`interconnection_agent.migrate.apply_migrations`.
     """
+    alias_table = load_alias_table()
     workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     try:
         sheet = workbook[ACTIVE_SHEET]
@@ -146,6 +168,9 @@ def run_caiso_ingest(
 
         rows_read = 0
         rows_written = 0
+        unmapped_rows = 0
+        active_mw = 0.0
+        unmapped_mw = 0.0
         dropped: list[DroppedRow] = []
 
         for offset, row in enumerate(sheet.iter_rows(min_row=FIRST_DATA_ROW, values_only=True)):
@@ -169,6 +194,11 @@ def run_caiso_ingest(
                 )
                 continue
 
+            raw_poi = _verbatim(cell(row, STATION))
+            normalized_poi = alias_table.resolve(raw_poi)
+            poi_unmapped = normalized_poi is None
+            mw = _mw(cell(row, NET_MW_TO_GRID))
+
             conn.execute(
                 _UPSERT,
                 {
@@ -179,12 +209,25 @@ def run_caiso_ingest(
                     "county": _clean(cell(row, COUNTY)),
                     "state": _clean(cell(row, STATE)),
                     "study_region": _clean(cell(row, PTO_STUDY_REGION)),
-                    "raw_poi": _verbatim(cell(row, STATION)),
+                    "raw_poi": raw_poi,
+                    "normalized_poi": normalized_poi,
+                    "poi_unmapped": poi_unmapped,
                     "utility": _clean(cell(row, UTILITY)),
                 },
             )
             rows_written += 1
+            active_mw += mw
+            if poi_unmapped:
+                unmapped_rows += 1
+                unmapped_mw += mw
 
-        return IngestReport(rows_read=rows_read, rows_written=rows_written, dropped=tuple(dropped))
+        return IngestReport(
+            rows_read=rows_read,
+            rows_written=rows_written,
+            dropped=tuple(dropped),
+            unmapped_rows=unmapped_rows,
+            active_mw=active_mw,
+            unmapped_mw=unmapped_mw,
+        )
     finally:
         workbook.close()
