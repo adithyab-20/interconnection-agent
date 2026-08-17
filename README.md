@@ -71,6 +71,7 @@ src/interconnection_agent/        # application package
 src/interconnection_agent/tests/  # unit tests for this component (pure, no DB)
 tests/integration/                # integration tests (real Postgres via Compose)
 tests/e2e/                        # end-to-end tests (full-stack; none yet)
+data/                        # frozen source workbooks + third-party attribution
 docker-compose.yml           # local Postgres service
 .github/workflows/ci.yml     # push + pull_request CI
 docs/                        # ADRs, specs, agent docs
@@ -79,3 +80,11 @@ CONTEXT.md                   # domain vocabulary
 
 Test layout convention (unit next to the code, integration/e2e under `tests/`) is
 documented in [`tests/README.md`](tests/README.md).
+
+## Data & attribution
+
+The `data/` directory holds the frozen public datasets this project ingests — CAISO's
+Public Queue Report and LBNL's "Queued Up" file. They are used for educational and research
+purposes and fall outside this repository's software license; each source's credit and terms
+are recorded in [`data/README.md`](data/README.md). Neither CAISO, LBNL, nor GridTracker
+endorses this project.
