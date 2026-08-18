@@ -12,7 +12,11 @@ from interconnection_agent.ingest import DroppedRow, IngestReport, SheetReport
 
 def test_unmapped_share_is_unmapped_over_written_mw() -> None:
     sheet = SheetReport(
-        sheet="s", rows_read=10, rows_written=10, unmapped_rows=1, mw_written=1000.0,
+        sheet="s",
+        rows_read=10,
+        rows_written=10,
+        unmapped_rows=1,
+        mw_written=1000.0,
         unmapped_mw=15.0,
     )
     assert sheet.unmapped_mw_share == 0.015
@@ -28,11 +32,18 @@ def test_aggregate_counts_roll_up_the_per_sheet_reports() -> None:
     report = IngestReport(
         sheets=(
             SheetReport(
-                sheet="a", rows_read=5, rows_written=4, resources_written=6,
-                resources_skipped=2, dropped=(DroppedRow("a", 9, "no queue position"),),
+                sheet="a",
+                rows_read=5,
+                rows_written=4,
+                resources_written=6,
+                resources_skipped=2,
+                dropped=(DroppedRow("a", 9, "no queue position"),),
             ),
             SheetReport(
-                sheet="b", rows_read=3, rows_written=3, resources_written=2,
+                sheet="b",
+                rows_read=3,
+                rows_written=3,
+                resources_written=2,
             ),
         )
     )
