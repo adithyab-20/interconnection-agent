@@ -2,8 +2,8 @@
 
 Two subcommands:
 
-  * ``ingest <workbook>`` — load CAISO's active sheet into the canonical schema and print
-    the resulting :class:`~interconnection_agent.ingest.report.IngestReport`;
+  * ``ingest <workbook>`` — load CAISO's three sheets into the canonical schema and print
+    the resulting per-sheet :class:`~interconnection_agent.ingest.report.IngestReport`;
   * ``projects --county <county>`` — list the active projects in a county;
   * ``projects --poi <name>`` — list the projects at a normalized (reviewed) POI.
 
@@ -115,16 +115,20 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         report = run_caiso_ingest(Path(args.workbook), conn)
         conn.commit()
     print(
-        f"Ingested CAISO active sheet: {report.rows_written} written, "
-        f"{report.rows_dropped} dropped, {report.rows_read} read."
+        f"Ingested CAISO: {report.rows_written} projects and "
+        f"{report.resources_written} resources written, {report.rows_dropped} dropped, "
+        f"{report.resources_skipped} resources skipped, {report.rows_read} read."
     )
-    print(
-        f"  POI coverage: {report.unmapped_rows} unmapped "
-        f"({report.unmapped_mw:.0f} of {report.active_mw:.0f} active MW, "
-        f"{report.unmapped_mw_share:.2%})."
-    )
+    for sheet in report.sheets:
+        print(
+            f"  {sheet.sheet}: {sheet.rows_written} written, "
+            f"{sheet.resources_written} resources ({sheet.resources_skipped} skipped), "
+            f"{sheet.rows_dropped} dropped; POI {sheet.unmapped_rows} unmapped "
+            f"({sheet.unmapped_mw:.0f} of {sheet.mw_written:.0f} MW, "
+            f"{sheet.unmapped_mw_share:.2%})."
+        )
     for dropped in report.dropped:
-        print(f"  dropped row {dropped.row_number}: {dropped.reason}")
+        print(f"  dropped {dropped.sheet} row {dropped.row_number}: {dropped.reason}")
     return 0
 
 
@@ -144,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="interconnection-agent")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    ingest = sub.add_parser("ingest", help="load CAISO's active sheet into the schema")
+    ingest = sub.add_parser("ingest", help="load CAISO's three sheets into the schema")
     ingest.add_argument("workbook", help="path to publicqueuereport.xlsx")
     ingest.set_defaults(func=_cmd_ingest)
 
