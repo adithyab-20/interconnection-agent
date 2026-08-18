@@ -15,6 +15,10 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.14",
     "types-openpyxl>=3.1.5.20260724",
+    # Offline POI-alias proposal only (scripts/propose_poi_aliases.py). Deliberately a dev
+    # dependency, never a runtime one: fuzzy matching must never be reachable from code
+    # that runs beneath a verified claim. test_poi_offline_only guards the boundary.
+    "rapidfuzz>=3.0",
 ]
 
 [build-system]

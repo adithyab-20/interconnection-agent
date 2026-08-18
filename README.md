@@ -81,6 +81,44 @@ CONTEXT.md                   # domain vocabulary
 Test layout convention (unit next to the code, integration/e2e under `tests/`) is
 documented in [`tests/README.md`](tests/README.md).
 
+## POI normalization & coverage
+
+CAISO's station field is free text: the same substation appears as "Whirlwind Substation
+230kV", "WHIRLWIND Substation 230 kV", and "Whirlwind Sub 230kV bus". Projects are grouped
+to a point of interconnection in two **deterministic** steps, so no probabilistic join ever
+runs beneath a verified claim:
+
+1. **Normalizer** (`interconnection_agent.poi.normalize`) — collapses only *mechanical*
+   variation: unicode compatibility forms (NFKC), case, whitespace, the `230kV` / `230 kV`
+   spelling, and hyphen spacing. It deliberately keeps descriptors like "Substation",
+   "Line", and "Bus", and never merges voltage levels — a 230 kV bus and a 500 kV bus at
+   one site are different POIs.
+2. **Reviewed alias table** (`src/interconnection_agent/poi/aliases.csv`, versioned) — maps
+   each normalized key to a canonical POI name by **exact match**. This is where genuine
+   synonyms, typos ("Vota-South" → "Volta-South"), and suffix variants are grouped. A string
+   with no reviewed entry resolves to `normalized_poi = NULL`, `poi_unmapped = true` — it is
+   counted, never guessed.
+
+Fuzzy matching is confined to the offline proposal tool
+(`scripts/propose_poi_aliases.py`, `rapidfuzz`), which suggests candidate groups for human
+review and is **not importable by runtime code** (guarded by
+`test_poi_offline_only.py`).
+
+**Measured coverage (active sheet, report dated 07/24/2026):** of 270 active projects
+(76,287 MW), **2 projects / 1,100 MW — 1.44% of active-queue MW — are unmapped**, both
+because their POI is merely *conceptual* or *proposed* (no established substation, so no
+energized history to ground a saturation figure). That clears the project's stopping
+criterion of <2% of active-queue MW unmapped. Reproduce it with:
+
+```bash
+# Needs Postgres up (see above); prints the coverage line as it ingests.
+PYTHONPATH=src uv run python -m interconnection_agent.cli ingest data/publicqueuereport.xlsx
+```
+
+The reviewed groupings are cross-checked against LBNL's independent `poi_name` for the
+overlapping CAISO projects; disagreements are reported for review by
+`tests/integration/test_poi_lbnl_crosscheck.py`.
+
 ## Data & attribution
 
 The `data/` directory holds the frozen public datasets this project ingests — CAISO's

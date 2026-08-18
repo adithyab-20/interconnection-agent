@@ -229,6 +229,10 @@ plan_files/
 data/*
 !data/publicqueuereport.xlsx
 !data/README.md
+# The LBNL source workbook is 15 MB and stays out of git; the POI cross-check
+# (tests/integration/test_poi_lbnl_crosscheck.py) reads this frozen slice of its CAISO
+# poi_name column instead — small enough to commit, so the assertion runs in CI.
+!data/lbnl_caiso_poi.csv
 
 # macOS
 .DS_Store

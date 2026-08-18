@@ -67,11 +67,34 @@ def test_ingest_maps_a_known_project_into_the_canonical_schema(conn: Conn) -> No
         "CA",
         "PGAE",
         "Birds Landing 230 kV",  # raw_poi is the operator's string, verbatim
-        None,  # no alias table yet (ticket 5)
-        True,  # so every row is unmapped for now
+        "Birds Landing 230 kV",  # normalized through the reviewed alias table (ticket 5)
+        False,  # resolved, so not flagged unmapped
         datetime.date(2003, 11, 18),
         datetime.date(2005, 6, 30),
     )
+
+
+@pytest.mark.usefixtures("report")
+def test_ingest_flags_a_conceptual_poi_as_unmapped(conn: Conn) -> None:
+    # CAISO-0096's station is "Tehachapi Conceptual Substation #1" — a POI that does not
+    # physically exist, so the reviewer left it out of the alias table. It must be flagged,
+    # never guessed: an energized-history saturation figure needs a real substation.
+    row = conn.execute(
+        "SELECT raw_poi, normalized_poi, poi_unmapped "
+        "FROM caiso_projects WHERE native_id = 'CAISO-0096'"
+    ).fetchone()
+    assert row == ("Tehachapi Conceptual Substation #1", None, True)
+
+
+def test_ingest_accounts_unmapped_rows_as_count_and_share_of_active_mw(
+    report: IngestReport,
+) -> None:
+    # Coverage is a measured number, not an assumption. Exactly the two conceptual/proposed
+    # POIs are unmapped, and their share of active-queue MW clears the <2% stopping bar.
+    assert report.unmapped_rows == 2
+    assert report.active_mw == pytest.approx(76287.3, abs=0.1)
+    assert report.unmapped_mw == pytest.approx(1100.0, abs=0.1)
+    assert 0.0 < report.unmapped_mw_share < 0.02
 
 
 def test_ingest_reports_read_written_and_dropped_with_reason(report: IngestReport) -> None:

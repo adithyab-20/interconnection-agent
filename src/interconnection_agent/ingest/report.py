@@ -22,12 +22,26 @@ class DroppedRow:
 
 @dataclass(frozen=True)
 class IngestReport:
-    """The outcome of an ingest run: what was read, written, and dropped-with-reason."""
+    """The outcome of an ingest run: what was read, written, and dropped-with-reason.
+
+    POI coverage is measured here too, so an unmapped row is a reported number rather than
+    a silent exclusion: ``unmapped_rows`` counts written rows whose station string had no
+    reviewed alias, and ``unmapped_mw`` / ``active_mw`` express that as a share of
+    active-queue MW — the figure the <2% stopping criterion is judged against.
+    """
 
     rows_read: int
     rows_written: int
     dropped: tuple[DroppedRow, ...] = ()
+    unmapped_rows: int = 0
+    active_mw: float = 0.0
+    unmapped_mw: float = 0.0
 
     @property
     def rows_dropped(self) -> int:
         return len(self.dropped)
+
+    @property
+    def unmapped_mw_share(self) -> float:
+        """Unmapped MW as a fraction of active-queue MW; 0.0 when no MW was ingested."""
+        return self.unmapped_mw / self.active_mw if self.active_mw else 0.0
