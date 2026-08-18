@@ -55,6 +55,16 @@ def test_aggregate_counts_roll_up_the_per_sheet_reports() -> None:
     assert report.for_sheet("b").rows_written == 3
 
 
+def test_dropped_row_category_defaults_to_its_reason() -> None:
+    # A drop with no distinct detail buckets under its own reason; a detailed drop keeps the
+    # detail in `reason` and a stable bucket in `category` for summaries to group on.
+    plain = DroppedRow("s", 4, "no queue position")
+    detailed = DroppedRow("s", 9, "duplicate natural key: 'APS / Q173'", category="duplicate key")
+    assert plain.category == "no queue position"
+    assert detailed.category == "duplicate key"
+    assert detailed.reason == "duplicate natural key: 'APS / Q173'"
+
+
 def test_for_sheet_raises_for_an_uningested_sheet() -> None:
     report = IngestReport(sheets=(SheetReport(sheet="a", rows_read=0, rows_written=0),))
     try:

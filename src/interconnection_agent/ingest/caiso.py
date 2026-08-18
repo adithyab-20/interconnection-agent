@@ -39,14 +39,13 @@ indices, so a reviewer can see which CAISO field feeds which canonical column.
 
 from __future__ import annotations
 
-import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
 import openpyxl
 import psycopg
-from openpyxl.worksheet.worksheet import Worksheet
 
+from interconnection_agent.ingest import _cells
 from interconnection_agent.ingest.report import DroppedRow, IngestReport, SheetReport
 from interconnection_agent.ingest.status import canonical_status
 from interconnection_agent.poi import AliasTable, load_alias_table
@@ -107,17 +106,6 @@ SHEETS: tuple[SheetSpec, ...] = (
 )
 
 
-def _normalize_header(value: object) -> str:
-    """Collapse a header cell's internal newlines/whitespace to a single-spaced string."""
-    return " ".join(str(value).split()) if value is not None else ""
-
-
-def _header_index(sheet: Worksheet) -> dict[str, int]:
-    """Map each normalized header on the header row to its 0-based position in the row."""
-    header_cells = next(sheet.iter_rows(min_row=HEADER_ROW, max_row=HEADER_ROW, values_only=True))
-    return {_normalize_header(v): i for i, v in enumerate(header_cells) if v is not None}
-
-
 def _native_id(queue_position: object) -> str:
     """Build the natural-key id from the queue position (e.g. 22 -> ``CAISO-0022``).
 
@@ -133,53 +121,9 @@ def _native_id(queue_position: object) -> str:
     return f"CAISO-{str(queue_position).strip()}"
 
 
-def _as_date(value: object) -> datetime.date | None:
-    """Coerce a workbook cell to a date; times of day are dropped, blanks stay NULL."""
-    if isinstance(value, datetime.datetime):
-        return value.date()
-    if isinstance(value, datetime.date):
-        return value
-    return None
-
-
-def _clean(value: object) -> str | None:
-    """Trim a text cell, treating an all-whitespace or empty cell as NULL."""
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _verbatim(value: object) -> str | None:
-    """Return a text cell exactly as the operator wrote it — no trimming.
-
-    ``raw_poi`` is a provenance field: it must reproduce the original cell so a
-    reader can always see the operator's string. Only a truly empty cell is NULL.
-    """
-    return str(value) if value is not None else None
-
-
-def _mw_or_none(value: object) -> float | None:
-    """Coerce a MW cell to a float, or ``None`` when it is blank or non-numeric.
-
-    A boolean is never a quantity (``bool`` is an ``int`` subclass), so it too reads as
-    ``None``.
-    """
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if value is not None:
-        try:
-            return float(str(value).strip())
-        except ValueError:
-            return None
-    return None
-
-
 def _mw(value: object) -> float:
     """A Net-MW quantity for coverage sums; a blank or non-numeric cell contributes zero."""
-    return _mw_or_none(value) or 0.0
+    return _cells.mw_or_none(value) or 0.0
 
 
 _UPSERT = """
@@ -242,7 +186,7 @@ def _ingest_sheet(
 ) -> SheetReport:
     """Ingest one CAISO sheet into ``projects`` (+ ``project_resources``); return its report."""
     sheet = workbook[spec.name]
-    columns = _header_index(sheet)
+    columns = _cells.header_index(sheet, HEADER_ROW)
 
     def cell(row: tuple[object, ...], header: str) -> object:
         """Read a cell by header; a column absent from this sheet reads as NULL."""
@@ -255,8 +199,8 @@ def _ingest_sheet(
         by_fuel: dict[str, float] = {}
         skipped = 0
         for fuel_header, mw_header in zip(FUEL_HEADERS, MW_HEADERS, strict=True):
-            fuel = _clean(cell(row, fuel_header))
-            mw = _mw_or_none(cell(row, mw_header))
+            fuel = _cells.clean(cell(row, fuel_header))
+            mw = _cells.mw_or_none(cell(row, mw_header))
             if fuel is None and mw is None:
                 continue  # an empty triple is not a resource
             if fuel is None:
@@ -281,22 +225,27 @@ def _ingest_sheet(
         rows_read += 1
 
         queue_position = cell(row, QUEUE_POSITION)
-        if queue_position is None or _clean(queue_position) is None:
+        if queue_position is None or _cells.clean(queue_position) is None:
             # Footer notes and the disclaimer live in the data range but carry no queue
             # position; without the natural key they are not projects.
             dropped.append(DroppedRow(spec.name, row_number, "no queue position"))
             continue
 
-        raw_status = _clean(cell(row, APPLICATION_STATUS))
+        raw_status = _cells.clean(cell(row, APPLICATION_STATUS))
         status = canonical_status(raw_status) if raw_status else None
         if status is None:
             dropped.append(
-                DroppedRow(spec.name, row_number, f"unrecognized status: {raw_status!r}")
+                DroppedRow(
+                    spec.name,
+                    row_number,
+                    f"unrecognized status: {raw_status!r}",
+                    category="unrecognized status",
+                )
             )
             continue
 
         native_id = _native_id(queue_position)
-        raw_poi = _verbatim(cell(row, STATION))
+        raw_poi = _cells.verbatim(cell(row, STATION))
         normalized_poi = alias_table.resolve(raw_poi)
         poi_unmapped = normalized_poi is None
         mw = _mw(cell(row, NET_MW_TO_GRID))
@@ -306,25 +255,25 @@ def _ingest_sheet(
             {
                 "native_id": native_id,
                 "status": status,
-                "q_date": _as_date(cell(row, QUEUE_DATE)),
-                "proposed_online_date": _as_date(cell(row, PROPOSED_ONLINE_DATE)),
+                "q_date": _cells.as_date(cell(row, QUEUE_DATE)),
+                "proposed_online_date": _cells.as_date(cell(row, PROPOSED_ONLINE_DATE)),
                 "actual_online_date": (
-                    _as_date(cell(row, spec.actual_online_header))
+                    _cells.as_date(cell(row, spec.actual_online_header))
                     if spec.actual_online_header
                     else None
                 ),
                 "withdrawn_date": (
-                    _as_date(cell(row, spec.withdrawn_date_header))
+                    _cells.as_date(cell(row, spec.withdrawn_date_header))
                     if spec.withdrawn_date_header
                     else None
                 ),
-                "county": _clean(cell(row, COUNTY)),
-                "state": _clean(cell(row, STATE)),
-                "study_region": _clean(cell(row, PTO_STUDY_REGION)),
+                "county": _cells.clean(cell(row, COUNTY)),
+                "state": _cells.clean(cell(row, STATE)),
+                "study_region": _cells.clean(cell(row, PTO_STUDY_REGION)),
                 "raw_poi": raw_poi,
                 "normalized_poi": normalized_poi,
                 "poi_unmapped": poi_unmapped,
-                "utility": _clean(cell(row, UTILITY)),
+                "utility": _cells.clean(cell(row, UTILITY)),
             },
         )
         rows_written += 1

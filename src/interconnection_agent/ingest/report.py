@@ -16,11 +16,22 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class DroppedRow:
-    """One source row the ETL refused, with the reason a reviewer can act on."""
+    """One source row the ETL refused, with the reason a reviewer can act on.
+
+    ``reason`` is the human-facing detail (it names the offending value); ``category`` is the
+    machine-facing bucket a summary groups on, so a caller counts drops by kind without
+    parsing the reason string. ``category`` defaults to ``reason`` for the callers that carry
+    no distinct detail.
+    """
 
     sheet: str
     row_number: int  # 1-based row in the worksheet, so it points at a real cell
     reason: str
+    category: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.category:
+            object.__setattr__(self, "category", self.reason)
 
 
 @dataclass(frozen=True)

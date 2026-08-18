@@ -29,13 +29,14 @@ from pathlib import Path
 
 import openpyxl
 
+from interconnection_agent.ingest._cells import header_index
 from interconnection_agent.ingest.caiso import (
     ACTIVE_SHEET,
     APPLICATION_STATUS,
     FIRST_DATA_ROW,
+    HEADER_ROW,
     QUEUE_POSITION,
     STATION,
-    _header_index,
     _native_id,
 )
 from interconnection_agent.poi import load_alias_table, normalize_station
@@ -75,7 +76,7 @@ def _our_normalized_poi_by_id() -> dict[str, str]:
     workbook = openpyxl.load_workbook(CAISO_WORKBOOK, read_only=True, data_only=True)
     try:
         sheet = workbook[ACTIVE_SHEET]
-        columns = _header_index(sheet)  # read by header, not bare index, per caiso.py
+        columns = header_index(sheet, HEADER_ROW)  # read by header, not bare index, per caiso.py
 
         def cell(row: tuple[object, ...], header: str) -> object:
             index = columns[header]

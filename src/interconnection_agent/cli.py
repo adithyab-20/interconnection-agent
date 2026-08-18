@@ -1,9 +1,11 @@
 """Command-line access to the ingested queue — the walking skeleton's front door.
 
-Two subcommands:
+Subcommands:
 
   * ``ingest <workbook>`` — load CAISO's three sheets into the canonical schema and print
     the resulting per-sheet :class:`~interconnection_agent.ingest.report.IngestReport`;
+  * ``ingest-lbnl <workbook>`` — load LBNL's national Complete Queue Data sheet, tagged
+    ``source = lbnl`` and never aggregated with CAISO's rows (ADR-0001);
   * ``projects --county <county>`` — list the active projects in a county;
   * ``projects --poi <name>`` — list the projects at a normalized (reviewed) POI.
 
@@ -23,7 +25,7 @@ import psycopg
 from psycopg.rows import class_row
 
 from interconnection_agent.db import connect
-from interconnection_agent.ingest import run_caiso_ingest
+from interconnection_agent.ingest import run_caiso_ingest, run_lbnl_ingest
 
 Conn = psycopg.Connection[tuple[object, ...]]
 
@@ -132,6 +134,26 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_lbnl(args: argparse.Namespace) -> int:
+    with connect() as conn:
+        report = run_lbnl_ingest(Path(args.workbook), conn)
+        conn.commit()
+    print(
+        f"Ingested LBNL: {report.rows_written} projects and "
+        f"{report.resources_written} resources written, {report.rows_dropped} dropped, "
+        f"{report.resources_skipped} resources skipped, {report.rows_read} read."
+    )
+    # LBNL rows are tagged source = lbnl and never aggregated with CAISO's (ADR-0001). The
+    # drops are dominated by the (q_id, entity) collisions, so they are summarised per
+    # category (the DroppedRow's machine-facing bucket) rather than printed one per row.
+    by_category: dict[str, int] = {}
+    for dropped in report.dropped:
+        by_category[dropped.category] = by_category.get(dropped.category, 0) + 1
+    for category, count in sorted(by_category.items()):
+        print(f"  dropped {count}: {category}")
+    return 0
+
+
 def _cmd_projects(args: argparse.Namespace) -> int:
     with connect() as conn:
         if args.poi is not None:
@@ -151,6 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     ingest = sub.add_parser("ingest", help="load CAISO's three sheets into the schema")
     ingest.add_argument("workbook", help="path to publicqueuereport.xlsx")
     ingest.set_defaults(func=_cmd_ingest)
+
+    ingest_lbnl = sub.add_parser(
+        "ingest-lbnl", help="load LBNL's national Complete Queue Data sheet into the schema"
+    )
+    ingest_lbnl.add_argument("workbook", help="path to LBNL_Ix_Queue_Data_File_thru2025.xlsx")
+    ingest_lbnl.set_defaults(func=_cmd_ingest_lbnl)
 
     projects = sub.add_parser("projects", help="list CAISO projects by county or normalized POI")
     scope = projects.add_mutually_exclusive_group(required=True)
